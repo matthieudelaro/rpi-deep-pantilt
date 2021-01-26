@@ -307,6 +307,12 @@ dtparam=i2c1=on
 dtparam=i2c_arm=on
 ```
 
+# Tips and Tricks
+## Monitoring temperature
+```bash
+watch vcgencmd measure_temp
+```
+
 # Credits
 
 The MobileNetV3-SSD model in this package was derived from [TensorFlow's model zoo](https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/detection_model_zoo.md), with [post-processing ops added](https://gist.github.com/leigh-johnson/155264e343402c761c03bc0640074d8c).
