@@ -173,6 +173,12 @@ class PiCameraStream(object):
         self.stopped = False
         logging.info('starting camera preview')
         self.camera.start_preview()
+        import datetime
+        now = datetime.datetime.now()
+        self.camera.start_recording(f'/home/pi/Desktop/recordings/recorded_{now.strftime("%Y-%m-%d_%Hh%Mm%Ss")}.h264')
+        # self.camera.preview.alpha = 128
+        # self.camera.preview.full_screen = False
+        # self.camera.preview.window = (0, 0, resolution[0], resolution[1])
 
     def render_overlay(self):
         while True:
