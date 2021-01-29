@@ -12,13 +12,15 @@ logging.basicConfig()
 LOGLEVEL = logging.getLogger().getEffectiveLevel()
 
 RESOLUTION = (320, 320)
+print("EXECUTING EXPECTED CUSTOM CODE")
+print("==============================")
 
 logging.basicConfig()
 
 # https://github.com/dtreskunov/rpi-sensorium/commit/40c6f3646931bf0735c5fe4579fa89947e96aed7
 
 
-def run_pantilt_detect(center_x, center_y, labels, model_cls, rotation, resolution=RESOLUTION):
+def run_pantilt_detect(center_x, center_y, seconds_of_last_detection, nanoseconds_of_last_detection, labels, model_cls, rotation, resolution=RESOLUTION):
     '''
         Updates center_x and center_y coordinates with centroid of detected class's bounding box
         Overlay is only rendered around the tracked object
@@ -31,10 +33,15 @@ def run_pantilt_detect(center_x, center_y, labels, model_cls, rotation, resoluti
 
     label_idxs = model.label_to_category_index(labels)
     start_time = time.time()
+    start_time_nanoseconds = time.time_ns()
+    seconds_of_last_detection.value = start_time
+    nanoseconds_of_last_detection.value = start_time_nanoseconds
     fps_counter = 0
     while not capture_manager.stopped:
         if capture_manager.frame is not None:
             frame = capture_manager.read()
+            seconds = time.time()
+            nanoseconds = time.time_ns()
             prediction = model.predict(frame)
 
             if not len(prediction.get('detection_boxes')):
@@ -58,6 +65,8 @@ def run_pantilt_detect(center_x, center_y, labels, model_cls, rotation, resoluti
                 x = int(
                     RESOLUTION[0] - ((np.take(track_target, [1, 3])).mean() * RESOLUTION[0]))
                 center_x.value = x
+                seconds_of_last_detection.value = seconds
+                nanoseconds_of_last_detection.value = nanoseconds
 
                 display_name = model.category_index[tracked_classes[0]]['name']
                 logging.info(
@@ -216,3 +225,4 @@ class PiCameraStream(object):
 
     def stop(self):
         self.stopped = True
+
