@@ -4,6 +4,7 @@ from multiprocessing import Value, Process, Manager
 import pantilthat as pth
 import signal
 import sys
+import time, datetime
 
 from rpi_deep_pantilt.detect.camera import run_pantilt_detect
 from rpi_deep_pantilt.control.pid import PIDController
@@ -61,7 +62,7 @@ def set_servos(pan, tilt):
             logging.info(f'tilt_angle not in range {tilt_angle}')
 
 
-def pid_process(output, p, i, d, box_coord, origin_coord, action):
+def pid_process(output, p, i, d, box_coord, origin_coord, action, seconds_of_last_detection, nanoseconds_of_last_detection):
     # signal trap to handle keyboard interrupt
     signal.signal(signal.SIGINT, signal_handler)
 
@@ -73,6 +74,58 @@ def pid_process(output, p, i, d, box_coord, origin_coord, action):
     while True:
         error = origin_coord - box_coord.value
         output.value = p.update(error)
+        # print(f'{action} error {error} angle: {output.value}')
+        # logging.info(f'{action} error {error} angle: {output.value}')
+
+def naive_feedback_process(output, p, i, d, bouding_box_center, screen_center, action, seconds_of_last_detection, nanoseconds_of_last_detection):
+    # signal trap to handle keyboard interrupt
+    signal.signal(signal.SIGINT, signal_handler)
+
+    previous_detection_seconds = seconds_of_last_detection.value
+    previous_detection_nanoseconds = nanoseconds_of_last_detection.value
+
+    previous_correction_datetime = datetime.datetime.now()
+
+    # loop indefinitely
+    while True:
+        if seconds_of_last_detection.value == previous_detection_seconds and nanoseconds_of_last_detection.value == previous_detection_nanoseconds:
+            # time.sleep(0.01)
+            continue
+        error = screen_center - bouding_box_center.value # error in pixels, between 0 and 320
+        
+        # # V1: filtre passe-haut (amplitude) ou passe-bas (fréquence)
+        # if -30 < error < 30 :
+        #     correction = 0
+        # else:
+        #     correction = error / 20 # very good with the TPU
+
+        # V2
+        filter = RESOLUTION[0] * 0.1
+        step_magnitude = RESOLUTION[0] / 20
+        if -filter < error < filter :
+            correction = 0
+        else:
+            correction = error / step_magnitude
+        
+        correction = int(correction)
+        new_position = output.value + correction
+
+        if new_position < SERVO_MIN:
+            new_position = SERVO_MIN
+        elif new_position > SERVO_MAX:
+            new_position = SERVO_MAX
+        
+        output.value = new_position
+
+        print(f'{action} error {error} correction {correction} angle: {new_position}')
+        previous_detection_seconds = seconds_of_last_detection.value
+        previous_detection_nanoseconds = nanoseconds_of_last_detection.value
+        current_correction_datetime = datetime.datetime.now()
+        print(current_correction_datetime - previous_correction_datetime)
+        previous_correction_datetime = current_correction_datetime
+        # print(datetime.datetime.now() - datetime.datetime(seconds=previous_detection_seconds, microsecond=previous_detection_nanoseconds/1000))
+        # print(time.now() - datetime.datetime(seconds=previous_detection_seconds, microsecond=previous_detection_nanoseconds/1000))
+        # time.sleep(0.1) # to be tuned depending on FPS of the neural network. Ideally, this should wait for the next analysis, instead of a fixed amount of time.
         # logging.info(f'{action} error {error} angle: {output.value}')
 
 # ('person',)
@@ -99,27 +152,30 @@ def pantilt_process_manager(
         pan = manager.Value('i', 0)
         tilt = manager.Value('i', 0)
 
+        seconds_of_last_detection = manager.Value("f", 0)
+        nanoseconds_of_last_detection = manager.Value("i", 0)
+
         # PID gains for panning
 
-        pan_p = manager.Value('f', 0.05)
+        pan_p = manager.Value('f', 0.05) #default parameter: ('f', 0.05)
         # 0 time integral gain until inferencing is faster than ~50ms
         pan_i = manager.Value('f', 0.1)
         pan_d = manager.Value('f', 0)
 
         # PID gains for tilting
-        tilt_p = manager.Value('f', 0.15)
+        tilt_p = manager.Value('f', 0.15) #default parameter: ('f', 0.15)
         # 0 time integral gain until inferencing is faster than ~50ms
         tilt_i = manager.Value('f', 0.2)
         tilt_d = manager.Value('f', 0)
 
         detect_processr = Process(target=run_pantilt_detect,
-                                  args=(center_x, center_y, labels, model_cls, rotation))
+                                  args=(center_x, center_y, seconds_of_last_detection, nanoseconds_of_last_detection, labels, model_cls, rotation))
 
-        pan_process = Process(target=pid_process,
-                              args=(pan, pan_p, pan_i, pan_d, center_x, CENTER[0], 'pan'))
+        pan_process = Process(target=naive_feedback_process, #pid_process,
+                              args=(pan, pan_p, pan_i, pan_d, center_x, CENTER[0], 'pan', seconds_of_last_detection, nanoseconds_of_last_detection))
 
-        tilt_process = Process(target=pid_process,
-                               args=(tilt, tilt_p, tilt_i, tilt_d, center_y, CENTER[1], 'tilt'))
+        tilt_process = Process(target=naive_feedback_process, #pid_process,
+                               args=(tilt, tilt_p, tilt_i, tilt_d, center_y, CENTER[1], 'tilt', seconds_of_last_detection, nanoseconds_of_last_detection))
 
         servo_process = Process(target=set_servos, args=(pan, tilt))
 
